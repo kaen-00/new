@@ -186,28 +186,36 @@ class AppDemo(QMainWindow):
 
 
 class LinkEditor(QPlainTextEdit):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+    def load_link_aliases(self):
+        try:
+            with open("links.json", "r") as f:
+                return json.load(f)
+        except Exception as e:
+            print("Error loading links.json:", e)
+            return {}
+        
     def mouseReleaseEvent(self, event):
         super().mouseReleaseEvent(event)
-
+        self.link_aliases = self.load_link_aliases()
         cursor = self.cursorForPosition(event.pos())
         full_text = self.toPlainText()
         click_pos = cursor.position()
 
-        # Find all link matches in the text
-        for match in re.finditer(r"\[\[(.+?)\]\]", full_text):
-            start, end = match.span()
-            if start <= click_pos < end:
-                filename = match.group(1)
-                print(f"Clicked inside link: [[{filename}]]")
-                self.open_linked_file(filename + ".txt")
-                break
-
-
+        for alias, filename in self.link_aliases.items():
+            for match in re.finditer(re.escape(alias), full_text):
+                start, end = match.span()
+                if start <= click_pos < end:
+                    print(f"Clicked link: {alias} -> {filename}")
+                    self.open_linked_file(filename + ".txt")
+                    return
 
     def open_linked_file(self, filename):
         if not os.path.exists(filename):
             with open(filename, 'w') as f:
-                f.write("")  # Create empty file
+                f.write("")  # Create an empty file if it doesn't exist
 
         subprocess.Popen([sys.executable, sys.argv[0], filename])
 
