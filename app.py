@@ -7,6 +7,11 @@ from PyQt5.QtGui import QFontDatabase, QIcon, QKeySequence
 from PyQt5.QtPrintSupport import QPrintDialog
 from PyQt5.QtWidgets import QDockWidget
 
+from PyQt5.QtWidgets import (
+    QDockWidget, QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem,
+    QPushButton, QHBoxLayout, QMessageBox
+)
+
 class AppDemo(QMainWindow):
     def __init__(self, file_path = None):
         super().__init__()
@@ -94,7 +99,7 @@ class AppDemo(QMainWindow):
         # Dockable right panel
         dock = QDockWidget("Tools", self)
         dock.setAllowedAreas(Qt.RightDockWidgetArea)
-        dock.setWidget(QLabel("Right-side tools go here"))
+        dock.setWidget(LinkEditorWidget())
         self.addDockWidget(Qt.RightDockWidgetArea, dock)
 
         ###########################################
@@ -218,6 +223,73 @@ class LinkEditor(QPlainTextEdit):
                 f.write("")  # Create an empty file if it doesn't exist
 
         subprocess.Popen([sys.executable, sys.argv[0], filename])
+
+class LinkEditorWidget(QWidget):
+    def __init__(self, json_path="links.json"):
+        super().__init__()
+        self.json_path = json_path
+
+        self.layout = QVBoxLayout(self)
+        self.table = QTableWidget(0, 2)
+        self.table.setHorizontalHeaderLabels(["Alias", "Tag"])
+        self.layout.addWidget(self.table)
+
+        # Buttons
+        btn_layout = QHBoxLayout()
+        self.btn_add = QPushButton("Add")
+        self.btn_delete = QPushButton("Delete")
+        self.btn_save = QPushButton("Save")
+
+        btn_layout.addWidget(self.btn_add)
+        btn_layout.addWidget(self.btn_delete)
+        btn_layout.addWidget(self.btn_save)
+        self.layout.addLayout(btn_layout)
+
+        self.btn_add.clicked.connect(self.add_row)
+        self.btn_delete.clicked.connect(self.delete_selected)
+        self.btn_save.clicked.connect(self.save_json)
+
+        self.load_json()
+
+    def load_json(self):
+        self.table.setRowCount(0)
+        if not os.path.exists(self.json_path):
+            return
+        try:
+            with open(self.json_path, "r") as f:
+                data = json.load(f)
+            for alias, filename in data.items():
+                self.add_row(alias, filename)
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to load JSON: {e}")
+
+    def save_json(self):
+        data = {}
+        for row in range(self.table.rowCount()):
+            alias_item = self.table.item(row, 0)
+            file_item = self.table.item(row, 1)
+            if alias_item and file_item:
+                alias = alias_item.text().strip()
+                filename = file_item.text().strip()
+                if alias and filename:
+                    data[alias] = filename
+        try:
+            with open(self.json_path, "w") as f:
+                json.dump(data, f, indent=2)
+            QMessageBox.information(self, "Saved", "Links saved successfully.")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to save: {e}")
+
+    def add_row(self, alias='', filename=''):
+        row = self.table.rowCount()
+        self.table.insertRow(row)
+        self.table.setItem(row, 0, QTableWidgetItem(alias))
+        self.table.setItem(row, 1, QTableWidgetItem(filename))
+
+    def delete_selected(self):
+        selected = self.table.selectionModel().selectedRows()
+        for index in sorted(selected, reverse=True):
+            self.table.removeRow(index.row())
 
 app = QApplication(sys.argv)
 file_path = sys.argv[1] if len(sys.argv) > 1 else None
