@@ -15,7 +15,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Using device:", device)
 
 # Step 1: Load the dataset
-dataset = load_dataset("json", data_files="simplewiki_ner_dataset.jsonl")
+dataset = load_dataset("json", data_files="train_set.jsonl")
 
 # Step 2: Define labels
 label_list = ["O", "B-ENTITY", "I-ENTITY"]
@@ -82,7 +82,7 @@ args = TrainingArguments(
     learning_rate=2e-5,
     per_device_train_batch_size=16,
     per_device_eval_batch_size=16,
-    num_train_epochs=3,
+    num_train_epochs=10,
     weight_decay=0.01,
     logging_dir="./logs",
     report_to="none"
@@ -100,5 +100,5 @@ trainer = Trainer(
 
 # Step 7: Train the model
 trainer.train()
-trainer.save_model("./final_2")
-tokenizer.save_pretrained("./final_2")
+trainer.save_model("./final_3")
+tokenizer.save_pretrained("./final_3")
