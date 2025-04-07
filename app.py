@@ -9,7 +9,7 @@ from PyQt5.QtWidgets import QDockWidget
 
 from PyQt5.QtWidgets import (
     QDockWidget, QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem,
-    QPushButton, QHBoxLayout, QMessageBox
+    QPushButton, QHBoxLayout, QMessageBox, QLineEdit, QLabel
 )
 
 class AppDemo(QMainWindow):
@@ -234,6 +234,16 @@ class LinkEditorWidget(QWidget):
         self.table.setHorizontalHeaderLabels(["Alias", "Tag"])
         self.layout.addWidget(self.table)
 
+        # Search bar
+        search_layout = QHBoxLayout()
+        search_label = QLabel("Search:")
+        self.search_input = QLineEdit()
+        search_layout.addWidget(search_label)
+        search_layout.addWidget(self.search_input)
+        self.layout.addLayout(search_layout)
+
+        self.search_input.textChanged.connect(self.filter_rows)
+
         # Buttons
         btn_layout = QHBoxLayout()
         self.btn_add = QPushButton("Add")
@@ -290,6 +300,18 @@ class LinkEditorWidget(QWidget):
         selected = self.table.selectionModel().selectedRows()
         for index in sorted(selected, reverse=True):
             self.table.removeRow(index.row())
+
+    def filter_rows(self):
+        text = self.search_input.text().lower()
+        for row in range(self.table.rowCount()):
+            alias_item = self.table.item(row, 0)
+            filename_item = self.table.item(row, 1)
+
+            alias = alias_item.text().lower() if alias_item else ''
+            filename = filename_item.text().lower() if filename_item else ''
+
+            match = text in alias or text in filename
+            self.table.setRowHidden(row, not match)
 
 app = QApplication(sys.argv)
 file_path = sys.argv[1] if len(sys.argv) > 1 else None
