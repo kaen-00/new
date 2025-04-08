@@ -23,8 +23,8 @@ label_to_id = {l: i for i, l in enumerate(label_list)}
 id_to_label = {i: l for l, i in label_to_id.items()}
 
 # Step 3: Load tokenizer and model
-model = AutoModelForTokenClassification.from_pretrained("ner-model-final").to(device)
-tokenizer = AutoTokenizer.from_pretrained("ner-model-final")
+model = AutoModelForTokenClassification.from_pretrained("bert-base-cased").to(device)
+tokenizer = AutoTokenizer.from_pretrained("bert-base-cased")
 
 print("Model is on device:", next(model.parameters()).device)
 

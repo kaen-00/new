@@ -2,20 +2,22 @@ import sys, os, re, subprocess, json
 from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, \
                             QPushButton, QLabel, QPlainTextEdit, QStatusBar, QToolBar, \
                             QVBoxLayout, QAction, QFileDialog, QMessageBox
-from PyQt5.QtCore import Qt, QSize                          
+from PyQt5.QtCore import Qt, QSize, QTimer           
 from PyQt5.QtGui import QFontDatabase, QIcon, QKeySequence
 from PyQt5.QtPrintSupport import QPrintDialog
 from PyQt5.QtWidgets import QDockWidget
-
+from PyQt5.QtCore import QObject, QRunnable, QThreadPool, pyqtSlot
 from PyQt5.QtWidgets import (
     QDockWidget, QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem,
     QPushButton, QHBoxLayout, QMessageBox, QLineEdit, QLabel
 )
+from predict_ner import extract_and_append_entities
 
 class AppDemo(QMainWindow):
     def __init__(self, file_path = None):
         super().__init__()
-
+        self.enable_ner = False
+        self.last_processed_text = ""
         self.setWindowIcon(QIcon('./Icons/notepad.ico'))
         self.screen_width, self.screen_height = self.geometry().width(), self.geometry().height()
         self.resize(self.screen_width * 2, self.screen_height * 2) 
@@ -34,6 +36,12 @@ class AppDemo(QMainWindow):
         self.setCentralWidget(self.editor)
         self.editor.setFont(fixedFont)
         mainLayout.addWidget(self.editor)
+
+        #4 sentance prediction
+        self.previous_sentence_count = 0
+        self.threadpool = QThreadPool()
+        self.editor.textChanged.connect(self.check_for_new_sentences)
+        #
 
         # stautsBar
         self.statusBar = self.statusBar()
@@ -99,7 +107,8 @@ class AppDemo(QMainWindow):
         # Dockable right panel
         dock = QDockWidget("Tools", self)
         dock.setAllowedAreas(Qt.RightDockWidgetArea)
-        dock.setWidget(LinkEditorWidget())
+        self.link_widget = LinkEditorWidget()
+        dock.setWidget(self.link_widget)
         self.addDockWidget(Qt.RightDockWidgetArea, dock)
 
         ###########################################
@@ -110,10 +119,21 @@ class AppDemo(QMainWindow):
                     text = f.read()
                 self.path = file_path
                 self.editor.setPlainText(text)
+
+                # ✅ Reset sentence count after file is loaded
+                self.previous_sentence_count = len(re.findall(r'[.!?](?=\s)', text))
+                self.enable_ner = True  # ✅ Enable NER only after loading file
+
                 self.update_title()
             except Exception as e:
                 self.dialog_message(str(e))
+        else:
+            self.enable_ner = True  # ✅ Enable NER only if no file loaded
         ###########################################
+        # Refresh link widget every 1 second
+        self.link_refresh_timer = QTimer(self)
+        self.link_refresh_timer.timeout.connect(self.link_widget.refresh)
+        self.link_refresh_timer.start(1000)  # every 1000 milliseconds = 1 second
 
     def insert_link(self, filename):
         cursor = self.editor.textCursor()
@@ -189,6 +209,38 @@ class AppDemo(QMainWindow):
         # Show error messages here (e.g., QMessageBox)
         print(msg)
 
+    def check_for_new_sentences(self):
+        if not self.enable_ner:
+            return  # 🚫 Skip NER if disabled
+
+        text = self.editor.toPlainText()
+
+        # Count sentence endings using punctuation
+        sentence_endings = re.findall(r'[.!?](?=\s)', text)
+        current_count = len(sentence_endings)
+
+        if current_count - self.previous_sentence_count >= 4:
+            # Get only the new portion of the text
+            new_text = text[len(self.last_processed_text):].strip()
+            self.last_processed_text = text  # 🔁 Update the checkpoint
+            self.previous_sentence_count = current_count
+
+            last_lines = self.get_last_n_lines(new_text, 4)  # 🔍 Extract only new 4 lines
+            self.run_ner_in_background(last_lines)
+
+    def get_last_n_lines(self, text, n=4):
+        lines = text.strip().splitlines()
+        return "\n".join(lines[-n:])
+    
+    def run_ner_in_background(self, text):
+        worker = NERWorker(text, self.handle_ner_results)
+        self.threadpool.start(worker)
+
+    def handle_ner_results(self, tags):
+        print("✅ NER tags extracted:", tags)
+        # Optional: update UI
+        #self.tag_view.clear()
+        #self.tag_view.addItems(tags)
 
 class LinkEditor(QPlainTextEdit):
     def __init__(self, parent=None):
@@ -196,28 +248,52 @@ class LinkEditor(QPlainTextEdit):
 
     def load_link_aliases(self):
         try:
-            with open("links.json", "r") as f:
+            with open("ner_tags.json", "r") as f:
                 return json.load(f)
         except Exception as e:
             print("Error loading links.json:", e)
             return {}
         
+    def save_link_aliases(self):
+        try:
+            with open("ner_tags.json", "w") as f:
+                json.dump(self.link_aliases, f, indent=2)
+                print("✅ Updated ner_tags.json")
+        except Exception as e:
+            print("❌ Error saving ner_tags.json:", e)
+
     def mouseReleaseEvent(self, event):
         super().mouseReleaseEvent(event)
+
+        # Only trigger on right-click
+        if event.button() != Qt.RightButton:
+            return
+
         self.link_aliases = self.load_link_aliases()
         cursor = self.cursorForPosition(event.pos())
         full_text = self.toPlainText()
         click_pos = cursor.position()
 
-        for alias, filename in self.link_aliases.items():
-            for match in re.finditer(re.escape(alias), full_text):
-                start, end = match.span()
-                if start <= click_pos < end:
-                    print(f"Clicked link: {alias} -> {filename}")
-                    self.open_linked_file(filename + ".txt")
-                    return
+        # Match all [[link]] patterns
+        for match in re.finditer(r'\[\[([^\[\]]+)\]\]', full_text):
+            start, end = match.span()
+            if start <= click_pos < end:
+                tag = match.group(1).strip()
+                print(f"🖱️ Right-clicked on tag: [[{tag}]]")
+
+                filename = self.link_aliases.get(tag)
+
+                if not filename:
+                    # 🔧 Create new link entry if it doesn't exist
+                    filename = tag  # Keep filename same as tag for now
+                    self.link_aliases[tag] = filename
+                    self.save_link_aliases()
+
+                self.open_linked_file(filename)
+                return
 
     def open_linked_file(self, filename):
+        filename=filename+".txt"
         if not os.path.exists(filename):
             with open(filename, 'w') as f:
                 f.write("")  # Create an empty file if it doesn't exist
@@ -225,7 +301,7 @@ class LinkEditor(QPlainTextEdit):
         subprocess.Popen([sys.executable, sys.argv[0], filename])
 
 class LinkEditorWidget(QWidget):
-    def __init__(self, json_path="links.json"):
+    def __init__(self, json_path="ner_tags.json"):
         super().__init__()
         self.json_path = json_path
 
@@ -262,7 +338,7 @@ class LinkEditorWidget(QWidget):
         self.load_json()
 
     def load_json(self):
-        self.table.setRowCount(0)
+        self.table.setRowCount(0)  # Clear previous rows
         if not os.path.exists(self.json_path):
             return
         try:
@@ -271,7 +347,7 @@ class LinkEditorWidget(QWidget):
             for alias, filename in data.items():
                 self.add_row(alias, filename)
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to load JSON: {e}")
+            print("Error loading JSON:", e)
 
     def save_json(self):
         data = {}
@@ -312,6 +388,32 @@ class LinkEditorWidget(QWidget):
 
             match = text in alias or text in filename
             self.table.setRowHidden(row, not match)
+
+    def refresh(self):
+        self.load_json()
+
+def handle_ner_extraction(self, text):
+    tags = extract_and_append_entities(text)
+
+    print("✅ Tags extracted from text:")
+    print(tags)
+
+    # Optional: update the dock widget or UI with tags
+    self.tag_view.clear()
+    self.tag_view.addItems(tags)
+
+class NERWorker(QRunnable):
+    def __init__(self, text, callback):
+        super().__init__()
+        self.text = text
+        self.callback = callback
+
+    @pyqtSlot()
+    def run(self):
+        print("🧠 NER extraction starting with text:", repr(self.text))
+        tags = extract_and_append_entities(self.text)
+        self.callback(tags)
+
 
 app = QApplication(sys.argv)
 file_path = sys.argv[1] if len(sys.argv) > 1 else None
