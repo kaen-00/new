@@ -13,6 +13,25 @@ from PyQt5.QtWidgets import (
 )
 from predict_ner import extract_and_append_entities
 
+def update_ner_tags(filename):
+        tag = filename.strip()
+        tag_entry = f"[[{tag}]]"
+
+        try:
+            if os.path.exists("ner_tags.json"):
+                with open("ner_tags.json", "r") as f:
+                    ner_tags = json.load(f)
+            else:
+                ner_tags = {}
+
+            if tag_entry not in ner_tags:
+                ner_tags[tag_entry] = tag
+                with open("ner_tags.json", "w") as f:
+                    json.dump(ner_tags, f, indent=4)
+                print(f"✅ Added tag: {tag_entry} -> {tag}")
+        except Exception as e:
+            print(f"❌ Failed to update ner_tags.json: {e}")
+
 class AppDemo(QMainWindow):
     def __init__(self, file_path = None):
         super().__init__()
@@ -139,6 +158,8 @@ class AppDemo(QMainWindow):
         cursor = self.editor.textCursor()
         cursor.insertText(f"[[{filename}]]")
 
+    
+
     def file_open(self):
         path, _ = QFileDialog.getOpenFileName(
             parent=self,
@@ -149,7 +170,8 @@ class AppDemo(QMainWindow):
 
         if path:
             try:
-                # Launch a new instance of the current script with the file path
+                filename = os.path.splitext(os.path.basename(path))[0]
+                update_ner_tags(filename)
                 subprocess.Popen([sys.executable, sys.argv[0], path])
             except Exception as e:
                 self.dialog_message(str(e))
@@ -162,8 +184,10 @@ class AppDemo(QMainWindow):
                 text = self.editor.toPlainText()
                 with open(self.path, 'w') as f:
                     f.write(text)
-                    f.close()
-            except Exception as e:  
+
+                filename = os.path.splitext(os.path.basename(self.path))[0]
+                update_ner_tags(filename)
+            except Exception as e:
                 self.dialog_message(str(e))
 
     def file_saveAs(self):
@@ -182,13 +206,15 @@ class AppDemo(QMainWindow):
             try:
                 with open(path, 'w') as f:
                     f.write(text)
-                    f.close()
             except Exception as e:
                 self.dialog_message(str(e))
             else:
                 self.path = path
                 self.update_title()
-    
+                filename = os.path.splitext(os.path.basename(self.path))[0]
+                update_ner_tags(filename)
+
+
     def update_title(self):
         print(f"Updating title with path: {self.path}")
         self.setWindowTitle('{0} - NotepadX'.format(os.path.basename(self.path) if self.path else 'Unititled'))
@@ -286,7 +312,7 @@ class LinkEditor(QPlainTextEdit):
                 if not filename:
                     # 🔧 Create new link entry if it doesn't exist
                     filename = tag  # Keep filename same as tag for now
-                    self.link_aliases[tag] = filename
+                    self.link_aliases["[[" +tag+ "]]"] =  filename 
                     self.save_link_aliases()
 
                 self.open_linked_file(filename)
@@ -314,6 +340,7 @@ class LinkEditorWidget(QWidget):
         search_layout = QHBoxLayout()
         search_label = QLabel("Search:")
         self.search_input = QLineEdit()
+        self.search_input.textChanged.connect(self.filter_rows)  # ✅ Trigger search filter
         search_layout.addWidget(search_label)
         search_layout.addWidget(self.search_input)
         self.layout.addLayout(search_layout)
@@ -391,6 +418,7 @@ class LinkEditorWidget(QWidget):
 
     def refresh(self):
         self.load_json()
+        self.filter_rows()
 
 def handle_ner_extraction(self, text):
     tags = extract_and_append_entities(text)
