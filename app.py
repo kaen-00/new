@@ -187,19 +187,9 @@ class AppDemo(QMainWindow):
             last_lines = self.get_last_n_lines(new_text, 4)
             self.run_ner_in_background(last_lines)
             self.link_widget.refresh
-            try:
-                updated_text = find_and_replace_tags(text, "ner_tags.json")
-                if updated_text != text:
-                    cursor = self.editor.textCursor()
-                    position = cursor.position()
-                    self.editor.blockSignals(True)
-                    self.editor.setPlainText(updated_text)
-                    self.editor.blockSignals(False)
-                    if position <= len(updated_text):
-                        cursor.setPosition(position)
-                        self.editor.setTextCursor(cursor)
-            except Exception as e:
-                print(f"Error replacing tags: {e}")
+            updated_text = find_and_replace_tags(text, "ner_tags.json")
+            self.editor.blockSignals(True)
+            self.editor.setPlainText(updated_text)
             self.editor.blockSignals(False)
             cursor = self.editor.textCursor()
             cursor.movePosition(QTextCursor.End)
